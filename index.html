@@ -96,7 +96,7 @@
         document.getElementById('amapKey').addEventListener('change', saveKeys);
         document.getElementById('aiKey').addEventListener('change', saveKeys);
 
-        // ============ AI提取地名（增强错误显示） ============
+        // ============ AI 提取地名 ============
         async function parseStrategy() {
             const strategy = document.getElementById('strategyText').value.trim();
             const aiKey = getAiKey();
@@ -129,7 +129,6 @@
 
                 const data = await response.json();
 
-                // 检查 API 是否有错误返回
                 if (data.error) {
                     throw new Error(`API返回错误：${data.error.message || JSON.stringify(data.error)}`);
                 }
@@ -213,6 +212,7 @@
             }).join('');
         }
 
+        // ============ 定位 + 找下一个（已修复，使用 alert 弹窗） ============
         function findNextDestination() {
             if (places.length === 0) {
                 alert('请先提取地点');
@@ -227,6 +227,8 @@
                 (position) => {
                     const myLat = position.coords.latitude;
                     const myLng = position.coords.longitude;
+                    alert(`定位成功！\n你的坐标：${myLat.toFixed(6)}, ${myLng.toFixed(6)}`);
+
                     let minDist = Infinity;
                     let closestIndex = -1;
                     const distances = [];
@@ -240,6 +242,12 @@
                             }
                         }
                     });
+
+                    if (closestIndex === -1) {
+                        alert('所有地点都没有有效坐标，请检查高德Key并重新提取地点');
+                        return;
+                    }
+
                     let nextIndex;
                     if (minDist < 500) {
                         nextIndex = closestIndex + 1;
@@ -251,20 +259,22 @@
                         nextIndex = closestIndex;
                     }
                     currentIndex = nextIndex;
+
                     distances.forEach(({ index, dist }) => {
                         const distEl = document.getElementById(`dist-${index}`);
                         if (distEl) distEl.textContent = `距离约 ${formatDistance(dist)}`;
                     });
+
                     renderPlaceList(nextIndex);
+
                     setTimeout(() => {
                         const currentEl = document.querySelector('.current-step');
                         if (currentEl) currentEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
                     }, 100);
+
                     showStatus('parseStatus', `✅ 已定位！下一站：${places[nextIndex].name}`);
                     const distToNext = getDistance(myLat, myLng, places[nextIndex].lat, places[nextIndex].lng);
-                    if (confirm(`📍 下一站是「${places[nextIndex].name}」\n\n距离约 ${formatDistance(distToNext)}\n\n是否立即导航？`)) {
-                        navigateTo(nextIndex);
-                    }
+                    alert(`📍 下一站是「${places[nextIndex].name}」\n\n距离约 ${formatDistance(distToNext)}\n\n请手动点击该地点的“导航”按钮`);
                 },
                 (error) => {
                     let msg = '定位失败：';
@@ -277,7 +287,7 @@
                     alert(msg);
                     showStatus('parseStatus', '');
                 },
-                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+                { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
             );
         }
 
