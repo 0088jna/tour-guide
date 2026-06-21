@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>智能导游 - 下一步去哪儿</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; min-height: 100vh; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { text-align: center; margin-bottom: 20px; }
+        .header h1 { font-size: 24px; color: #333; }
+        .card { background: white; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .card h2 { font-size: 16px; color: #666; margin-bottom: 12px; display: flex; align-items: center; gap: 6px; }
+        textarea { width: 100%; height: 100px; border: 1px solid #ddd; border-radius: 8px; padding: 12px; font-size: 14px; resize: vertical; }
+        button { width: 100%; padding: 14px; background: #1677ff; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 8px; }
+        button:active { background: #0958d9; }
+        button:disabled { background: #ccc; }
+        .status { font-size: 13px; color: #999; margin-top: 8px; text-align: center; min-height: 20px; }
+        .step-list { list-style: none; }
+        .step-item { display: flex; align-items: center; padding: 12px 0; border-bottom: 1px solid #f0f0f0; }
+        .step-number { width: 28px; height: 28px; border-radius: 50%; background: #e6f4ff; color: #1677ff; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 14px; margin-right: 12px; flex-shrink: 0; }
+        .step-info { flex: 1; }
+        .step-name { font-weight: bold; font-size: 15px; }
+        .step-distance { font-size: 12px; color: #999; margin-top: 2px; }
+        .nav-btn { padding: 6px 16px; background: #1677ff; color: white; border: none; border-radius: 20px; font-size: 13px; cursor: pointer; width: auto; margin: 0; }
+        .nav-btn:active { background: #0958d9; }
+        .arrived-badge { background: #52c41a; color: white; font-size: 12px; padding: 2px 8px; border-radius: 10px; margin-left: 8px; }
+        .current-step { background: #fffbe6; border-radius: 8px; }
+        .no-data { text-align: center; color: #ccc; padding: 20px; }
+        .error-msg { color: #ff4d4f; font-size: 13px; margin-top: 6px; display: none; background: #fff2f0; padding: 8px; border-radius: 6px; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🗺️ 智能导游</h1>
+            <p style="color:#999;font-size:13px;margin-top:4px;">粘贴攻略 → 自动提取地点 → 实时导航</p>
+        </div>
+
+        <!-- 设置区域 -->
+        <div class="card">
+            <h2>⚙️ 设置 API Key</h2>
+            <input type="text" id="amapKey" placeholder="请输入高德地图 Key" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;font-size:14px;margin-bottom:8px;">
+            <input type="text" id="aiKey" placeholder="请输入 AI Key (DeepSeek)" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;font-size:14px;">
+            <p style="font-size:12px;color:#999;margin-top:4px;">Key 只保存在你的浏览器本地</p>
+        </div>
+
+        <!-- 攻略输入 -->
+        <div class="card">
+            <h2>📝 粘贴你的攻略</h2>
+            <textarea id="strategyText" placeholder="例如：上午先去拙政园，然后步行去苏州博物馆，中午在平江路吃饭，下午去双塔市集和观前街..."></textarea>
+            <button id="parseBtn" onclick="parseStrategy()">🔍 智能提取地点</button>
+            <div class="status" id="parseStatus"></div>
+            <div class="error-msg" id="parseError"></div>
+        </div>
+
+        <!-- 地点列表 -->
+        <div class="card">
+            <h2>📍 行程路线</h2>
+            <button id="locateBtn" onclick="findNextDestination()" style="background:#52c41a;margin-bottom:12px;" disabled>
+                📡 定位我，告诉我下一个去哪儿
+            </button>
+            <ul class="step-list" id="placeList">
+                <li class="no-data">请先粘贴攻略并提取地点</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        // ============ 全局变量 ============
+        let places = [];
+        let currentIndex = -1;
+
+        function getAmapKey() { return document.getElementById('amapKey').value.trim(); }
+        function getAiKey() { return document.getElementById('aiKey').value.trim(); }
+
+        function showStatus(id, msg) { document.getElementById(id).textContent = msg; }
+        function showError(id, msg) {
+            const el = document.getElementById(id);
+            el.textContent = msg;
+            el.style.display = 'block';
+        }
+        function hideError(id) { document.getElementById(id).style.display = 'none'; }
+
+        function saveKeys() {
+            localStorage.setItem('amapKey', getAmapKey());
+            localStorage.setItem('aiKey', getAiKey());
+        }
+        function loadKeys() {
+            const amapKey = localStorage.getItem('amapKey');
+            const aiKey = localStorage.getItem('aiKey');
+            if (amapKey) document.getElementById('amapKey').value = amapKey;
+            if (aiKey) document.getElementById('aiKey').value = aiKey;
+        }
+        document.getElementById('amapKey').addEventListener('change', saveKeys);
+        document.getElementById('aiKey').addEventListener('change', saveKeys);
+
+        // ============ AI提取地名（增强错误显示） ============
+        async function parseStrategy() {
+            const strategy = document.getElementById('strategyText').value.trim();
+            const aiKey = getAiKey();
+            
+            hideError('parseError');
+            if (!strategy) { showError('parseError', '请先粘贴攻略文字'); return; }
+            if (!aiKey) { showError('parseError', '请先填写 AI Key（DeepSeek的Key）'); return; }
+
+            const btn = document.getElementById('parseBtn');
+            btn.disabled = true;
+            btn.textContent = '⏳ AI正在解析...';
+            showStatus('parseStatus', '正在调用AI提取地名...');
+
+            try {
+                const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${aiKey}`
+                    },
+                    body: JSON.stringify({
+                        model: 'deepseek-chat',
+                        messages: [{
+                            role: 'user',
+                            content: `请从以下旅游攻略中，按游玩顺序提取所有地点名称。只返回地点名，每行一个，不要序号、不要任何其他文字。如果攻略没有明确顺序，按地理逻辑排列。\n\n攻略内容：\n${strategy}`
+                        }],
+                        temperature: 0
+                    })
+                });
+
+                const data = await response.json();
+
+                // 检查 API 是否有错误返回
+                if (data.error) {
+                    throw new Error(`API返回错误：${data.error.message || JSON.stringify(data.error)}`);
+                }
+                if (!data.choices || !data.choices[0]) {
+                    throw new Error(`AI返回格式异常，完整响应：${JSON.stringify(data)}`);
+                }
+
+                const rawList = data.choices[0].message.content.trim();
+                const placeNames = rawList.split('\n').filter(name => name.trim().length > 0).map(name => name.trim());
+
+                if (placeNames.length === 0) {
+                    throw new Error('AI没有提取到任何地点，请检查攻略内容');
+                }
+
+                showStatus('parseStatus', `提取到 ${placeNames.length} 个地点，正在获取坐标...`);
+                places = await getCoordinates(placeNames);
+                
+                showStatus('parseStatus', `✅ 成功提取 ${places.length} 个地点`);
+                document.getElementById('locateBtn').disabled = false;
+                renderPlaceList();
+
+            } catch (error) {
+                showError('parseError', `提取失败：${error.message}`);
+                showStatus('parseStatus', '');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🔍 智能提取地点';
+            }
+        }
+
+        // 高德地理编码
+        async function getCoordinates(placeNames) {
+            const amapKey = getAmapKey();
+            if (!amapKey) throw new Error('请先填写高德地图 Key');
+
+            const results = [];
+            for (const name of placeNames) {
+                const url = `https://restapi.amap.com/v3/geocode/geo?key=${amapKey}&address=${encodeURIComponent(name)}`;
+                const resp = await fetch(url);
+                const data = await resp.json();
+                
+                if (data.status === '1' && data.geocodes && data.geocodes.length > 0) {
+                    const location = data.geocodes[0].location.split(',');
+                    results.push({
+                        name: name,
+                        lng: parseFloat(location[0]),
+                        lat: parseFloat(location[1])
+                    });
+                } else {
+                    results.push({ name: name, lng: null, lat: null });
+                }
+            }
+            return results;
+        }
+
+        function renderPlaceList(nextIndex = -1) {
+            const listEl = document.getElementById('placeList');
+            if (places.length === 0) {
+                listEl.innerHTML = '<li class="no-data">请先粘贴攻略并提取地点</li>';
+                return;
+            }
+            listEl.innerHTML = places.map((place, index) => {
+                let extraClass = '';
+                let badge = '';
+                if (index < nextIndex) {
+                    badge = '<span class="arrived-badge">已到达</span>';
+                } else if (index === nextIndex) {
+                    extraClass = ' current-step';
+                    badge = '<span style="color:#fa8c16;font-size:12px;margin-left:8px;">👈 下一站</span>';
+                }
+                return `
+                    <li class="step-item${extraClass}">
+                        <div class="step-number">${index + 1}</div>
+                        <div class="step-info">
+                            <div class="step-name">${place.name}${badge}</div>
+                            <div class="step-distance" id="dist-${index}"></div>
+                        </div>
+                        ${place.lng ? `<button class="nav-btn" onclick="navigateTo(${index})">🧭 导航</button>` : '<span style="font-size:12px;color:#ccc;">坐标缺失</span>'}
+                    </li>
+                `;
+            }).join('');
+        }
+
+        function findNextDestination() {
+            if (places.length === 0) {
+                alert('请先提取地点');
+                return;
+            }
+            showStatus('parseStatus', '正在获取你的位置...');
+            if (!navigator.geolocation) {
+                alert('你的浏览器不支持定位，请用手机浏览器打开');
+                return;
+            }
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    const myLat = position.coords.latitude;
+                    const myLng = position.coords.longitude;
+                    let minDist = Infinity;
+                    let closestIndex = -1;
+                    const distances = [];
+                    places.forEach((place, index) => {
+                        if (place.lng && place.lat) {
+                            const dist = getDistance(myLat, myLng, place.lat, place.lng);
+                            distances.push({ index, dist });
+                            if (dist < minDist) {
+                                minDist = dist;
+                                closestIndex = index;
+                            }
+                        }
+                    });
+                    let nextIndex;
+                    if (minDist < 500) {
+                        nextIndex = closestIndex + 1;
+                        if (nextIndex >= places.length) {
+                            alert('🎉 恭喜！你已经到达最后一个地点，行程结束！');
+                            nextIndex = places.length - 1;
+                        }
+                    } else {
+                        nextIndex = closestIndex;
+                    }
+                    currentIndex = nextIndex;
+                    distances.forEach(({ index, dist }) => {
+                        const distEl = document.getElementById(`dist-${index}`);
+                        if (distEl) distEl.textContent = `距离约 ${formatDistance(dist)}`;
+                    });
+                    renderPlaceList(nextIndex);
+                    setTimeout(() => {
+                        const currentEl = document.querySelector('.current-step');
+                        if (currentEl) currentEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }, 100);
+                    showStatus('parseStatus', `✅ 已定位！下一站：${places[nextIndex].name}`);
+                    const distToNext = getDistance(myLat, myLng, places[nextIndex].lat, places[nextIndex].lng);
+                    if (confirm(`📍 下一站是「${places[nextIndex].name}」\n\n距离约 ${formatDistance(distToNext)}\n\n是否立即导航？`)) {
+                        navigateTo(nextIndex);
+                    }
+                },
+                (error) => {
+                    let msg = '定位失败：';
+                    switch(error.code) {
+                        case error.PERMISSION_DENIED: msg += '请允许浏览器获取位置权限'; break;
+                        case error.POSITION_UNAVAILABLE: msg += '无法获取位置信息'; break;
+                        case error.TIMEOUT: msg += '定位超时'; break;
+                        default: msg += '未知错误';
+                    }
+                    alert(msg);
+                    showStatus('parseStatus', '');
+                },
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+            );
+        }
+
+        function getDistance(lat1, lng1, lat2, lng2) {
+            const R = 6371000;
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLng = (lng2 - lng1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                      Math.sin(dLng/2) * Math.sin(dLng/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c;
+        }
+
+        function formatDistance(meters) {
+            if (meters < 1000) return Math.round(meters) + ' 米';
+            return (meters / 1000).toFixed(1) + ' 公里';
+        }
+
+        function navigateTo(index) {
+            if (index < 0 || index >= places.length) return;
+            const place = places[index];
+            if (!place.lng || !place.lat) {
+                alert('该地点坐标缺失，无法导航');
+                return;
+            }
+            const uri = `https://uri.amap.com/navigation?to=${place.lng},${place.lat},${encodeURIComponent(place.name)}&mode=car&callnative=1`;
+            window.location.href = uri;
+        }
+
+        loadKeys();
+    </script>
+</body>
+</html>
